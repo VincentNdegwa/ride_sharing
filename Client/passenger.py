@@ -8,23 +8,21 @@ def connect_to_server():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
         client_socket.connect((HOST, PORT))
 
-        # Identify as a passenger
+        print(client_socket.recv(1024).decode('utf-8'))
         client_socket.send("passenger".encode('utf-8'))
 
-        # Send passenger details
-        print(client_socket.recv(1024).decode('utf-8'))  # "Enter your name:"
-        name = input("Enter your name: ")
+        print(client_socket.recv(1024).decode('utf-8'))
+        name = input()
         client_socket.send(name.encode('utf-8'))
 
-        print(client_socket.recv(1024).decode('utf-8'))  # "Enter your pickup latitude:"
-        lat = input("Enter your pickup latitude: ")
+        print(client_socket.recv(1024).decode('utf-8'))
+        lat = input()
         client_socket.send(lat.encode('utf-8'))
 
-        print(client_socket.recv(1024).decode('utf-8'))  # "Enter your pickup longitude:"
-        lon = input("Enter your pickup longitude: ")
+        print(client_socket.recv(1024).decode('utf-8'))
+        lon = input()
         client_socket.send(lon.encode('utf-8'))
 
-        # Receive driver assignment or unavailability message
         print(client_socket.recv(1024).decode('utf-8'))
 
 if __name__ == "__main__":

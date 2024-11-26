@@ -1,16 +1,19 @@
 import socket
 from math import radians, sin, cos, sqrt, atan2
 from threading import Thread
+from multiprocessing import Process, Queue
 import os
 from dotenv import load_dotenv
+import time
 
 load_dotenv()
 
-passengers = {}
-drivers = {}
-
 host = os.getenv('HOST')
 port = int(os.getenv('PORT'))
+
+# Shared queues for workers
+passenger_queue = Queue()
+driver_queue = Queue()
 
 # Calculate distance using the Haversine formula
 def calculate_distance(lat1, lon1, lat2, lon2):
@@ -23,6 +26,47 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     c = 2 * atan2(sqrt(a), sqrt(1 - a))
 
     return R * c
+
+# Worker process to match passengers and drivers
+def worker_process(passenger_queue, driver_queue):
+    while True:
+        try:
+            if not passenger_queue.empty() and not driver_queue.empty():
+                # Get the next passenger and driver
+                passenger = passenger_queue.get()
+                driver = driver_queue.get()
+
+                # Match logic
+                distance = calculate_distance(
+                    passenger["lat"], passenger["lon"], driver["lat"], driver["lon"]
+                )
+
+                # Inform the passenger and driver
+                driver_socket = driver["socket"]
+                passenger_socket = passenger["socket"]
+
+                # Notify driver and get confirmation
+                driver_response = send_and_receive(
+                    driver_socket,
+                    f"Ride request from {passenger['name']}. Pickup at ({passenger['lat']}, {passenger['lon']}). Approve? (yes/no): "
+                )
+
+                if driver_response.lower() == "yes":
+                    passenger_socket.send(
+                        f"Driver {driver['name']} is on the way!".encode('utf-8')
+                    )
+                    driver_socket.send(
+                        f"You have been assigned to passenger {passenger['name']}".encode('utf-8')
+                    )
+                else:
+                    # If the driver rejects, requeue both
+                    passenger_queue.put(passenger)
+                    driver_queue.put(driver)
+
+        except Exception as e:
+            print(f"Error in worker process: {e}")
+
+        time.sleep(0.5)  # Avoid busy-waiting
 
 # Helper function to send a message and receive a response
 def send_and_receive(client_socket, message):
@@ -37,42 +81,16 @@ def handle_passenger(client_socket, addr):
         lat = float(send_and_receive(client_socket, "Enter your pickup latitude: "))
         lon = float(send_and_receive(client_socket, "Enter your pickup longitude: "))
 
-        # Add passenger details to the global dictionary
-        passengers[addr] = {"name": name, "lat": lat, "long": lon}
+        # Add passenger to the queue
+        passenger = {"name": name, "lat": lat, "lon": lon, "socket": client_socket}
+        passenger_queue.put(passenger)
 
-        matched_driver_id = None
-
-        # Find the nearest available driver
-        for driver_id, driver in drivers.items():
-            if driver["available"] and driver["lat"] is not None and driver["long"] is not None:
-                distance = calculate_distance(lat, lon, driver["lat"], driver["long"])
-                if distance < float('inf'):  # Prioritize nearest driver
-                    # Connect to driver
-                    driver_socket = driver.get("socket")
-                    if driver_socket:
-                        # Send ride request details to driver
-                        response = send_and_receive(
-                            driver_socket,
-                            f"Ride request from {name}. Pickup at ({lat}, {lon}). Approve? (yes/no): "
-                        )
-
-                        if response.lower() == "yes":
-                            matched_driver_id = driver_id
-                            break
-
-        # Inform passenger of the result
-        if matched_driver_id:
-            client_socket.send(
-                f"Driver {drivers[matched_driver_id]['name']} is on the way!".encode('utf-8')
-            )
-            drivers[matched_driver_id]["available"] = False
-        else:
-            client_socket.send("No drivers available or approved the request. Please try again later.".encode('utf-8'))
-
+        # Inform the passenger they are queued
+        client_socket.send("You have been added to the queue. Waiting for a driver.".encode('utf-8'))
     except Exception as e:
         print(f"Error while handling passenger {addr}: {e}")
     finally:
-        client_socket.close()
+        pass
 
 # Handle driver interactions
 def handle_driver(client_socket, addr):
@@ -82,17 +100,18 @@ def handle_driver(client_socket, addr):
         lat = float(send_and_receive(client_socket, "Enter your current latitude: "))
         lon = float(send_and_receive(client_socket, "Enter your current longitude: "))
 
-        # Add driver details to the global dictionary
-        driver_id = len(drivers) + 1
-        drivers[driver_id] = {"name": name, "lat": lat, "long": lon, "available": True, "socket": client_socket}
+        # Add driver to the queue
+        driver = {"name": name, "lat": lat, "lon": lon, "socket": client_socket}
+        driver_queue.put(driver)
 
+        # Inform the driver they are available
         client_socket.send("You are now available for ride requests.".encode('utf-8'))
     except Exception as e:
         print(f"Error while handling driver {addr}: {e}")
     finally:
-        # Keep driver socket open for ride requests
         pass
 
+# Handle client connections
 def handle_client(client_socket, addr):
     client_type = send_and_receive(client_socket, "Are you a driver or passenger? (Enter driver/passenger): ")
 
@@ -104,12 +123,17 @@ def handle_client(client_socket, addr):
         client_socket.send("Invalid type. Disconnecting.".encode('utf-8'))
         client_socket.close()
 
+# Start the server
 def start_server(host=host, port=port):
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.bind((host, port))
     server_socket.listen(5)
 
     print(f"Server started at {host}:{port}")
+
+    # Start worker processes
+    for _ in range(2):  # Adjust the number of workers as needed
+        Process(target=worker_process, args=(passenger_queue, driver_queue)).start()
 
     while True:
         client_socket, addr = server_socket.accept()

@@ -32,6 +32,18 @@ def passenger_client():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
         client_socket.connect((host, port))
         handle_interaction(client_socket, "passenger")
+        
+        while True:
+            try:
+                message = client_socket.recv(1024).decode('utf-8')
+                if not message:
+                    break
+                
+                print(message)
+             
+            except Exception as e:
+                print("Error:", e)
+                break
 
 
 def driver_client():
@@ -46,8 +58,8 @@ def driver_client():
                 ride_request = client_socket.recv(1024).decode('utf-8')
                 if not ride_request:
                     break
-                print("Ride Request Received:", ride_request)
-                response = input("Enter 'yes' to approve or 'no' to decline: ")
+                
+                response = input(ride_request)
                 client_socket.send(response.encode('utf-8'))
             except Exception as e:
                 print("Error:", e)

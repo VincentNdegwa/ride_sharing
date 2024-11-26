@@ -1,12 +1,16 @@
 import socket
 
-# Server configuration
-HOST = 'localhost'
-PORT = 12345
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+host = os.getenv('HOST')
+port = int(os.getenv('PORT'))
 
 def connect_to_server():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
-        client_socket.connect((HOST, PORT))
+        client_socket.connect((host, port))
 
         print(client_socket.recv(1024).decode('utf-8'))
         client_socket.send("passenger".encode('utf-8'))

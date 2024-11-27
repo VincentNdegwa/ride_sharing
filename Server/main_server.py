@@ -18,40 +18,75 @@ driver_queue = Queue()
 # In-memory user database for authentication
 user_db = {}
 
-# Define worker function to be used by each server
+driver_status = {}  
 def worker_process(passenger_queue, driver_queue):
     while True:
         try:
             if not passenger_queue.empty() and not driver_queue.empty():
                 passenger = passenger_queue.get()
-                driver = driver_queue.get()
+                available_drivers = []
 
-                # Matching logic
+                # Check for available drivers
+                while not driver_queue.empty():
+                    driver = driver_queue.get()
+                    driver_name = driver["name"]
+                    passenger_name = passenger["name"]
+
+                    # Initialize driver status if not already tracked
+                    if driver_name not in driver_status:
+                        driver_status[driver_name] = {'available': True, 'rejections': {}}
+
+                    status = driver_status[driver_name]
+
+                    # Check availability and rejection timestamp
+                    if status["available"]:
+                        rejection_time = status["rejections"].get(passenger_name)
+                        if rejection_time is None or time.time() - rejection_time > 120:
+                            available_drivers.append(driver)
+
+                # If no drivers available, re-add the passenger and wait
+                if not available_drivers:
+                    passenger_queue.put(passenger)
+                    time.sleep(2)
+                    continue
+
+                # Match passenger to the first available driver
+                driver = available_drivers.pop(0)
+                driver_name = driver["name"]
                 distance = calculate_distance(
                     passenger["lat"], passenger["lon"], driver["lat"], driver["lon"]
                 )
 
-                # Inform the passenger and driver
                 driver_socket = driver["socket"]
                 passenger_socket = passenger["socket"]
 
                 # Send ride request to driver
                 driver_response = send_and_receive(
                     driver_socket,
-                    f"Ride request from {passenger['name']}. Pickup at ({passenger['lat']}, {passenger['lon']}). Approve? (yes/no): "
+                    f"Ride request from {passenger_name}. Pickup at ({passenger['lat']}, {passenger['lon']}). Approve? (yes/no): "
                 )
 
                 if driver_response.lower() == "yes":
-                    passenger_socket.send(f"Driver {driver['name']} is on the way!".encode('utf-8'))
-                    driver_socket.send(f"You have been assigned to passenger {passenger['name']}".encode('utf-8'))
+                    # Update availability status
+                    driver_status[driver_name]["available"] = False
+
+                    passenger_socket.send(f"Driver {driver_name} is on the way!".encode('utf-8'))
+                    driver_socket.send(f"You have been assigned to passenger {passenger_name}".encode('utf-8'))
                 else:
+                    # Record rejection timestamp for this passenger
+                    driver_status[driver_name]["rejections"][passenger_name] = time.time()
+
+                    # Re-add the passenger to the queue
                     passenger_queue.put(passenger)
+
+                    # Re-add the driver to the queue (still available for other passengers)
                     driver_queue.put(driver)
 
         except Exception as e:
             print(f"Error in worker process: {e}")
 
         time.sleep(0.5)
+
 
 # Helper function to calculate the distance
 def calculate_distance(lat1, lon1, lat2, lon2):
@@ -78,8 +113,8 @@ def send_and_receive(client_socket, message):
 def handle_passenger(client_socket, addr, user):
     try:
         name = user["username"]
-        lat = float(send_and_receive(client_socket, "Enter your pickup latitude: "))
-        lon = float(send_and_receive(client_socket, "Enter your pickup longitude: "))
+        lat = float(send_and_receive(client_socket, "Enter your pickup latitude:"))
+        lon = float(send_and_receive(client_socket, "Enter your pickup longitude:"))
         passenger = {"name": name, "lat": lat, "lon": lon, "socket": client_socket}
         passenger_queue.put(passenger)
         client_socket.send("You have been added to the queue. Waiting for a driver.".encode('utf-8'))
@@ -90,8 +125,8 @@ def handle_passenger(client_socket, addr, user):
 def handle_driver(client_socket, addr, user):
     try:
         name = user["username"]
-        lat = float(send_and_receive(client_socket, "Enter your current latitude: "))
-        lon = float(send_and_receive(client_socket, "Enter your current longitude: "))
+        lat = float(send_and_receive(client_socket, "Enter your current latitude:"))
+        lon = float(send_and_receive(client_socket, "Enter your current longitude:"))
         driver = {"name": name, "lat": lat, "lon": lon, "socket": client_socket}
         driver_queue.put(driver)
         print(driver)

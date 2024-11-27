@@ -11,40 +11,50 @@ port = int(os.getenv('PORT'))
 
 
 def driver_client(client_socket):
-    # handle_interaction(client_socket, "driver")
-
     while True:
         try:
-            ride_request = client_socket.recv(1024).decode('utf-8')
-            if "Enter your current latitude: " in ride_request:
+            ride_request = client_socket.recv(1024).decode('utf-8').strip()
+            
+            if "Enter your current latitude:" in ride_request:
                 lat = input(ride_request)
                 client_socket.send(lat.encode('utf-8'))
-            if "Enter your current longitude: " in ride_request:
+                continue
+            if "Enter your current longitude:" in ride_request:
                 lon = input(ride_request)
                 client_socket.send(lon.encode('utf-8'))
-            if "You are now available for ride requests." in ride_request:
-                print(ride_request)
-            else:
-                print(ride_request)
+                continue
+            if "Ride request from" in ride_request and "Approve? (yes/no):" in ride_request:
+                response = input(ride_request)
+                client_socket.send(response.encode('utf-8'))
+                continue
+
+            print(ride_request)
+
         except Exception as e:
             print(f"Error in driver logic: {e}")
             break
 
 
+
 def passenger_client(client_socket):
     while True:
         try:
-            ride_request = client_socket.recv(1024).decode('utf-8')
-            if "Enter your current latitude: " in ride_request:
+            ride_request = client_socket.recv(1024).decode('utf-8').strip()
+            
+            if "Enter your pickup latitude:" in ride_request:
                 lat = input(ride_request)
                 client_socket.send(lat.encode('utf-8'))
-            if "Enter your current longitude: " in ride_request:
+                continue  
+
+            if "Enter your pickup longitude:" in ride_request:
                 lon = input(ride_request)
                 client_socket.send(lon.encode('utf-8'))
-            else:
-                print(ride_request)
+                continue  
+
+            print(ride_request)
+
         except Exception as e:
-            print(f"Error in driver logic: {e}")
+            print(f"Error in passenger logic: {e}")
             break
 
 
@@ -54,12 +64,12 @@ def handle_authenticate(client_socket):
         print("Received:", response)
         
         if "Do you want to login or register? (login/register)" in response:
-            choice = input()  # Get choice from the user (login or register)
-            client_socket.send(choice.encode('utf-8'))  # Send the choice to the server
+            choice = input()  
+            client_socket.send(choice.encode('utf-8'))  
         
         elif "Enter username:" in response:
-            username = input()  # Get username from user
-            client_socket.send(username.encode('utf-8'))  # Send username to server
+            username = input()  
+            client_socket.send(username.encode('utf-8'))  
         
         elif "Enter password:" in response:
             password = input()  # Get password from user
@@ -68,10 +78,6 @@ def handle_authenticate(client_socket):
         elif "Select your role (driver or passenger):" in response:
             role = input()  # Get role from user (driver or passenger)
             client_socket.send(role.encode('utf-8'))  # Send role to server
-        
-        elif "Login successful!" in response:
-            print("Login successful!")
-            return  # Authentication successful, exit loop
         
         elif "Invalid credentials. Try again." in response:
             print("Invalid credentials. Try again...")
